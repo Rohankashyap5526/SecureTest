@@ -1,0 +1,116 @@
+[
+  {
+    "id": "CLOUD-101",
+    "title": "Cloud Computing Fundamentals",
+    "description": "An 11-question sample assessment covering core cloud computing concepts, service models, deployment models, virtualization, security, DevOps and code-output reasoning.",
+    "durationMinutes": 10,
+    "questions": [
+      {
+        "question": "What does IaaS stand for in cloud computing?",
+        "options": [
+          "Infrastructure as a Service",
+          "Internet as a Service",
+          "Integration as a Service",
+          "Information as a Service"
+        ],
+        "answer": 0
+      },
+      {
+        "question": "Which cloud service model provides a managed application development platform?",
+        "options": [
+          "IaaS",
+          "PaaS",
+          "SaaS",
+          "DaaS"
+        ],
+        "answer": 1
+      },
+      {
+        "question": "Which deployment model is dedicated to a single organization?",
+        "options": [
+          "Public cloud",
+          "Community cloud",
+          "Private cloud",
+          "Hybrid cloud"
+        ],
+        "answer": 2
+      },
+      {
+        "question": "What is the primary purpose of a load balancer?",
+        "options": [
+          "Store backups",
+          "Distribute traffic across servers",
+          "Encrypt source code",
+          "Create database tables"
+        ],
+        "answer": 1
+      },
+      {
+        "question": "Which technology allows multiple virtual machines to run on one physical host?",
+        "options": [
+          "Virtualization",
+          "Compilation",
+          "Encryption",
+          "Compression"
+        ],
+        "answer": 0
+      },
+      {
+        "question": "Which principle gives a user only the permissions required to perform their job?",
+        "options": [
+          "Open access",
+          "Least privilege",
+          "Single sign-on",
+          "High availability"
+        ],
+        "answer": 1
+      },
+      {
+        "question": "What is the main goal of CI/CD?",
+        "options": [
+          "Automate software build, test and delivery processes",
+          "Replace all databases with spreadsheets",
+          "Increase manual deployment steps",
+          "Disable version control"
+        ],
+        "answer": 0
+      },
+      {
+        "question": "Which tool is commonly used for distributed version control?",
+        "options": [
+          "Git",
+          "Docker",
+          "Kubernetes",
+          "Terraform"
+        ],
+        "answer": 0
+      },
+      {
+        "question": "Which approach combines on-premises infrastructure with public cloud resources?",
+        "options": [
+          "Private cloud",
+          "Hybrid cloud",
+          "Edge-only cloud",
+          "Local hosting"
+        ],
+        "answer": 1
+      },
+      {
+        "question": "What does auto-scaling primarily help a cloud application do?",
+        "options": [
+          "Automatically adjust resources based on demand",
+          "Permanently remove all servers",
+          "Convert code into a PDF",
+          "Disable monitoring"
+        ],
+        "answer": 0
+      },
+      {
+        "type": "code_output",
+        "question": "What is the output of the following Python code?",
+        "codeSnippet": "x = 5\ny = 2\nprint(x * y + 1)",
+        "expectedOutput": "11"
+      }
+    ]
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "name": "securetest-assessment-platform",
+  "version": "2.0.0",
+  "private": true,
+  "description": "SecureTest online assessment platform with Supabase PostgreSQL storage",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "xlsx": "^0.18.5"
+  }
+}
