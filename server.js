@@ -4,27 +4,38 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const PgSession = require('connect-pg-simple')(session);
+const { Pool } = require('pg');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_URL = String(process.env.SUPABASE_URL || '').trim();
+// Prefer the modern Supabase server-side Secret key. Keep the legacy
+// service_role variable supported for existing Render deployments.
+const SUPABASE_KEY = String(
+  process.env.SUPABASE_SECRET_KEY ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  ''
+).trim();
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('\nSecureTest cannot start: missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.');
-  console.error('Copy .env.example to .env for local use, or add these variables to Render.\n');
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('\nSecureTest cannot start: missing SUPABASE_URL and/or SUPABASE_SECRET_KEY.');
+  console.error('For existing deployments, SUPABASE_SERVICE_ROLE_KEY is also supported.\n');
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false }
 });
 
 app.disable('x-powered-by');
+// Render terminates HTTPS at its proxy. Trusting the proxy is required so
+// express-session can correctly set Secure cookies on the public HTTPS URL.
+if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(session({
+const sessionOptions = {
   name: 'securetest.sid',
   secret: process.env.SESSION_SECRET || 'CHANGE-ME-IN-PRODUCTION',
   resave: false,
@@ -35,7 +46,26 @@ app.use(session({
     secure: process.env.NODE_ENV === 'production',
     maxAge: 8 * 60 * 60 * 1000
   }
-}));
+};
+
+// On Render, use PostgreSQL-backed sessions when DATABASE_URL is configured.
+// This removes the production MemoryStore warning and survives restarts.
+if (process.env.DATABASE_URL) {
+  const sessionPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 5
+  });
+  sessionOptions.store = new PgSession({
+    pool: sessionPool,
+    tableName: 'securetest_sessions',
+    createTableIfMissing: true
+  });
+} else if (process.env.NODE_ENV === 'production') {
+  console.warn('WARNING: DATABASE_URL is not set; admin sessions use in-memory storage. Configure DATABASE_URL for persistent production sessions.');
+}
+
+app.use(session(sessionOptions));
 app.use(express.static(path.join(__dirname, 'public')));
 
 function requireAdmin(req, res, next) {
@@ -443,7 +473,7 @@ app.get('/api/health', async (req, res) => {
     if (error) throw error;
     return res.json({ ok: true, database: 'supabase' });
   } catch (error) {
-    return res.status(503).json({ ok: false, database: 'unavailable' });
+    return res.status(503).json({ ok: false, database: 'unavailable', error: error.message || 'Supabase connection failed' });
   }
 });
 
