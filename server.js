@@ -287,24 +287,45 @@ app.get('/api/admin/results.xlsx', requireAdmin, async (req, res) => {
 
 app.delete('/api/admin/student-data', requireAdmin, async (req, res) => {
   try {
-    // Use a single database transaction through a SECURITY DEFINER RPC.
-    // This guarantees the delete order is correct (answers -> attempts -> students)
-    // and prevents a partial cleanup if any foreign-key operation fails.
-    const { data, error } = await supabase.rpc('admin_delete_all_student_data');
-    if (error) {
-      console.error('Student data delete RPC failed:', error);
-      return res.status(500).json({ error: error.message || 'Could not delete student data' });
-    }
-    const result = Array.isArray(data) ? (data[0] || {}) : (data || {});
+    // PostgREST intentionally rejects an unfiltered DELETE ("DELETE requires a
+    // WHERE clause"). Use explicit, always-true filters so the server can
+    // safely clear each table in the required child-to-parent order.
+    // This route is protected by requireAdmin and uses the server-side key.
+    const UUID_SENTINEL = '00000000-0000-0000-0000-000000000000';
+
+    const { data: answerRows, error: answerError } = await supabase
+      .from('answers')
+      .delete()
+      .neq('id', UUID_SENTINEL)
+      .select('id');
+    if (answerError) throw answerError;
+
+    const { data: attemptRows, error: attemptError } = await supabase
+      .from('attempts')
+      .delete()
+      .neq('id', UUID_SENTINEL)
+      .select('id');
+    if (attemptError) throw attemptError;
+
+    const { data: studentRows, error: studentError } = await supabase
+      .from('students')
+      .delete()
+      .neq('id', UUID_SENTINEL)
+      .select('id');
+    if (studentError) throw studentError;
+
     return res.json({
       ok: true,
-      deletedStudents: Number(result.deleted_students || 0),
-      deletedAttempts: Number(result.deleted_attempts || 0),
-      deletedAnswers: Number(result.deleted_answers || 0)
+      deletedStudents: studentRows?.length || 0,
+      deletedAttempts: attemptRows?.length || 0,
+      deletedAnswers: answerRows?.length || 0
     });
   } catch (error) {
     console.error('Student data delete failed:', error);
-    return res.status(500).json({ error: error.message || 'Could not delete student data' });
+    return res.status(500).json({
+      error: 'Could not delete student data. No assessments or questions were deleted.',
+      details: process.env.NODE_ENV === 'production' ? undefined : error.message
+    });
   }
 });
 
