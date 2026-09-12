@@ -3,3 +3,28 @@
 /* Candidate identity + code question UI */
 .question-type-row{display:flex;gap:12px;margin-bottom:4px}.question-type-row label{max-width:300px}.code-editor,.code-block,.output-area{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace}.code-fields{margin-top:12px}.code-fields label{display:block}.code-block{margin:10px 0 16px;padding:18px;background:#0d1729;color:#eef3ff;border-radius:10px;overflow:auto;line-height:1.65;font-size:12px;white-space:pre-wrap}.code-question{margin-top:18px}.code-label{font-size:8px;font-weight:800;letter-spacing:1.2px;color:var(--primary);margin-bottom:7px}.output-label{font-weight:700}.output-area{width:100%;resize:vertical;margin-top:7px;min-height:120px;border:1px solid var(--line);border-radius:10px;padding:13px;background:#fbfcff;color:var(--ink);line-height:1.55}.code-hint{font-size:9px;color:var(--muted);margin:7px 0 0}.roll-badge{display:inline-flex;padding:5px 8px;border-radius:7px;background:#f2f4f7;font-weight:700;font-size:8px}.fullscreen-guard{position:fixed;inset:0;background:rgba(8,14,27,.92);z-index:9999;display:none;align-items:center;justify-content:center;padding:20px}.fullscreen-guard.active{display:flex}.fullscreen-guard-card{width:min(440px,100%);background:#fff;border-radius:18px;padding:30px;box-shadow:0 30px 90px rgba(0,0,0,.35);text-align:center}.fullscreen-guard-card .success-icon{margin:0 auto 18px}.fullscreen-guard-card h2{font:800 25px "Plus Jakarta Sans",Inter,sans-serif;margin:8px 0}.fullscreen-guard-card p{color:var(--muted);font-size:11px;line-height:1.6;margin:0 0 20px}
 @media(max-width:700px){.question-type-row label{max-width:none;width:100%}.fullscreen-guard-card{padding:24px 18px}}
+
+/* Production desktop auth layout: never allow the two admin panels to stack. */
+.auth-page {
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  display: grid !important;
+  grid-template-columns: minmax(360px, 43%) minmax(0, 57%) !important;
+  overflow: hidden;
+}
+.auth-brand-panel, .auth-form-panel { min-height: 100vh; min-height: 100dvh; }
+.auth-brand-panel { overflow: hidden; }
+.auth-form-panel { overflow-y: auto; }
+@media (max-width: 760px) {
+  .auth-page {
+    height: auto;
+    min-height: 100vh;
+    display: block !important;
+    overflow: visible;
+  }
+  .auth-brand-panel { display: none; }
+  .auth-form-panel { min-height: 100vh; }
+}
