@@ -1,104 +1,101 @@
-# SecureTest — Supabase + Render Deployment
+# 🛡️ SecureTest
 
-SecureTest is an Express-based online assessment platform. This version stores assessments and student results in Supabase PostgreSQL instead of local JSON files, making it suitable for deployment on Render.
+> Secure online assessment platform built with Express and Supabase PostgreSQL.
 
-## Features
+## ✨ Features
 
-- Professional student/admin UI
-- Candidate registration with university/college and roll number
-- One-attempt rule per roll number + assessment
+- Student and admin interfaces
+- Candidate registration
+- One-attempt restriction per roll number and assessment
 - Server-side scoring
-- Correct handling of unanswered questions
-- MCQ questions
-- Code-output questions with server-side expected output
-- Full-screen exam mode and violation detection
+- MCQ and code-output questions
+- Full-screen exam mode
+- Violation detection
 - Admin-only results
-- Excel export
-- Clean client-side routes
+- Excel result export
 - Supabase PostgreSQL persistence
+- Render deployment support
 
-## 1. Create Supabase project
+## 🏗️ Architecture
 
-Create a project at https://supabase.com/.
+~~~text
+Student / Admin
+      ↓
+Web UI
+      ↓
+Express Server
+      ↓
+Supabase PostgreSQL
+      ↓
+Tests + Results
+~~~
 
-Open **SQL Editor** and run:
+## 🧰 Tech Stack
 
-`supabase/schema.sql`
+- Node.js
+- Express
+- Supabase PostgreSQL
+- JavaScript
+- HTML / CSS
+- Excel export
+- Render
 
-The database has two private tables: `tests` and `results`. Row Level Security is enabled and no public policies are created because only the Express server should access these tables.
+## 🚀 Local Setup
 
-## 2. Get Supabase credentials
-
-From your Supabase project settings/API page, copy:
-
-- Project URL → `SUPABASE_URL`
-- Service role key → `SUPABASE_SERVICE_ROLE_KEY`
-
-**Never put the service role key in frontend JavaScript or GitHub.**
-
-## 3. Local setup
-
-```bash
+~~~bash
+git clone https://github.com/Rohankashyap5526/SecureTest.git
+cd SecureTest
 npm install
-```
+~~~
 
-Create `.env` from `.env.example` and fill in the values.
+Create `.env` from `.env.example`:
 
-Then seed the sample Cloud Computing assessment:
+~~~env
+NODE_ENV=development
+SUPABASE_URL=your_project_url
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+SESSION_SECRET=your_random_secret
+ADMIN_USER=your_admin_username
+ADMIN_PASSWORD=your_admin_password
+~~~
 
-```bash
-npm run seed
-```
+Run:
 
-Start:
-
-```bash
+~~~bash
 npm start
-```
+~~~
 
 Open `http://localhost:3000`.
 
-## 4. Render deployment
+## 🗄️ Database
 
-Push this folder to GitHub, then create a **Web Service** on Render.
+Run the SQL schema in `supabase/schema.sql` and configure Supabase before starting the application.
 
-Build command:
+## 🚀 Deployment
 
-```text
-npm install
-```
+The application can be deployed as a Render Web Service.
 
-Start command:
+Build command: `npm install`  
+Start command: `npm start`
 
-```text
-npm start
-```
+Configure all required environment variables in the deployment platform.
 
-Add these Render environment variables:
+## 🔐 Production Security
 
-```text
-NODE_ENV=production
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-SESSION_SECRET=long_random_secret
-ADMIN_USER=your_admin_username
-ADMIN_PASSWORD=your_strong_admin_password
-```
+- Never commit `.env`.
+- Never expose the Supabase service-role key to frontend code.
+- Use a strong session secret and admin password.
+- Use HTTPS in production.
+- For multiple server instances, use a persistent session store instead of the default memory store.
 
-Deploy the service.
+## 📌 Future Improvements
 
-After deployment, seed the sample test once. You can run `npm run seed` locally using the same Supabase credentials, or use Render's shell if available for your service.
+- Automated integration tests
+- Redis-backed sessions
+- Question import workflow
+- Detailed analytics dashboard
+- Role-based admin permissions
 
-## Important production notes
+## 📄 License
 
-1. Do not commit `.env` or the Supabase service-role key.
-2. Change the default admin password.
-3. Use a long random `SESSION_SECRET`.
-4. HTTPS is required in production; the session cookie automatically uses `secure=true` when `NODE_ENV=production`.
-5. The default Express MemoryStore is suitable for a small/demo deployment but is not a persistent multi-instance session store. For multiple server instances, use a persistent session store such as Redis.
-6. The database is the source of truth. Local JSON files are no longer used for tests/results.
-7. Excel is generated from the database on demand and is an export, not the primary database.
-
-## Default sample test
-
-The included `seed-tests.json` contains **Cloud Computing Fundamentals** with 11 questions, including one code-output question.
+MIT
