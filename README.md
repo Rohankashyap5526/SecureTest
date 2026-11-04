@@ -99,3 +99,7 @@ Configure all required environment variables in the deployment platform.
 ## 📄 License
 
 MIT
+
+## Camera Proctoring (security-hardening branch)
+
+The `security-hardening` branch includes local camera-based face/phone detection, server-side warning enforcement, optional incident-only snapshots with separate consent, and server-persisted answer autosave. Before testing, run `supabase/migrations/20261104_camera_proctoring.sql` in the Supabase SQL Editor. See [Camera Proctoring Setup](docs/CAMERA_PROCTORING_SETUP.md) for configuration, privacy notes, admin endpoints, limitations and the 150-student launch checklist. This branch has not been deployed.
