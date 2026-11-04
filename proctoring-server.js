@@ -30,6 +30,14 @@ function mountProctoring(app, { supabase, getTest, normalizeRollNumber, requireA
       if (fields.some(field => !String(student[field] || '').trim())) return res.status(400).json({ error: 'Complete all candidate details before starting.' });
 
       const rollNumber = normalizeRollNumber(student.rollNumber);
+      const mobileNumber = String(student.mobileNumber || '').replace(/\\D/g, '');
+      if (!/^\\d{10}$/.test(mobileNumber)) return res.status(400).json({ error: 'Enter a valid 10-digit mobile number.' });
+      const { data: phoneOwner, error: phoneError } = await supabase.from('students')
+        .select('id,roll_number').eq('mobile_number', mobileNumber).maybeSingle();
+      if (phoneError) throw phoneError;
+      if (phoneOwner && phoneOwner.roll_number !== rollNumber) {
+        return res.status(409).json({ error: 'This mobile number is already registered with another roll number.' });
+      }
       const currentSession = await findSession(req);
       if (currentSession && currentSession.test_id === test.id && currentSession.roll_number === rollNumber &&
           currentSession.status === 'active' && new Date(currentSession.expires_at).getTime() > Date.now()) {
