@@ -376,7 +376,15 @@ app.post('/api/tests/:id/submit', async (req, res) => {
     if (requiredFields.some(field => !String(student[field] || '').trim())) return res.status(400).json({ error: 'All candidate fields are required' });
 
     const rollNumber = normalizeRollNumber(student.rollNumber);
-    const answers = Array.isArray(req.examSession?.saved_answers) ? req.examSession.saved_answers : (Array.isArray(req.body?.answers) ? req.body.answers : []);
+    // The final submit payload is the latest candidate state. Prefer it over
+    // the periodic autosave snapshot, which may be up to 450ms behind.
+    // If the browser cannot provide it, fall back to the last server autosave.
+    const submittedAnswers = Array.isArray(req.body?.answers) ? req.body.answers : null;
+    const savedAnswers = Array.isArray(req.examSession?.saved_answers) ? req.examSession.saved_answers : null;
+    const answers = submittedAnswers || savedAnswers || [];
+    if (answers.length > questions.length) {
+      return res.status(400).json({ error: 'Invalid answer payload.' });
+    }
     let correct = 0;
     let totalMarks = 0;
     const answerRows = [];
