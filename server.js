@@ -5,6 +5,7 @@ const { Pool } = require('pg');
 const XLSX = require('xlsx');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const mountProctoring = require('./proctoring-server');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -142,6 +143,8 @@ async function getAllTests() {
     ? { id: q.id, type: 'code_output', question: q.question_text, codeSnippet: q.code_snippet || '', expectedOutput: q.expected_output || '', marks: Number(q.marks) || 1 }
     : { id: q.id, type: 'mcq', question: q.question_text, options: Array.isArray(q.options) ? q.options : [], answer: Number(q.correct_answer), marks: Number(q.marks) || 1 }) }));
 }
+
+mountProctoring(app, { supabase, getTest, normalizeRollNumber });
 
 // ------------------------- Admin auth -------------------------
 app.post('/api/admin/login', (req, res) => {
@@ -368,12 +371,12 @@ app.post('/api/tests/:id/submit', async (req, res) => {
     const test = await getTest(req.params.id);
     if (!test) return res.status(404).json({ error: 'Test not found' });
     const questions = await getQuestionsForTest(test.id);
-    const student = req.body?.student || {};
+    const student = req.examSession?.candidate || req.body?.student || {};
     const requiredFields = ['fullName','collegeName','rollNumber','mobileNumber','semester','branch','course'];
     if (requiredFields.some(field => !String(student[field] || '').trim())) return res.status(400).json({ error: 'All candidate fields are required' });
 
     const rollNumber = normalizeRollNumber(student.rollNumber);
-    const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
+    const answers = Array.isArray(req.body?.answers) ? req.body.answers : (Array.isArray(req.examSession?.saved_answers) ? req.examSession.saved_answers : []);
     let correct = 0;
     let totalMarks = 0;
     const answerRows = [];
@@ -424,7 +427,7 @@ app.post('/api/tests/:id/submit', async (req, res) => {
       marks: correct,
       total_marks: totalMarks,
       percentage,
-      violations: Math.max(0, Number(req.body?.violations) || 0),
+      violations: Math.max(0, Number(req.examSession?.violation_count) || 0),
       submitted_at: new Date().toISOString()
     }).select('*').single();
 
@@ -440,7 +443,9 @@ app.post('/api/tests/:id/submit', async (req, res) => {
       throw answerError;
     }
 
-    return res.json({ ok: true, submissionId, message: 'Test submitted successfully.' });
+    await supabase.from('exam_sessions').update({ status: 'submitted', submitted_at: new Date().toISOString() }).eq('id', req.examSession.id);
+    res.clearCookie('securetest.exam', { path: '/' });
+    return res.json({ ok: true, submissionId, message: 'Test submitted successfully.', terminated: req.examSession.status === 'terminated' });
   } catch (error) { console.error(error); return res.status(500).json({ error: 'Could not submit assessment' }); }
 });
 
