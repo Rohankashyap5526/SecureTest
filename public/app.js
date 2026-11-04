@@ -75,7 +75,7 @@ async function beginExam(){
   try{
     const snapshotConsent=await window.SecureTestProctoring.prepare();
     const student={fullName:$('fullName').value,collegeName:$('collegeName').value,rollNumber:$('rollNumber').value,mobileNumber:$('mobileNumber').value,semester:$('semester').value,branch:$('branch').value,course:$('course').value};
-    const started=await api('/api/tests/'+encodeURIComponent(test.id)+'/start',{method:'POST',body:JSON.stringify({student,cameraReady:true,snapshotConsent})});
+    const started=await api('/api/tests/'+encodeURIComponent(test.id)+'/start',{method:'POST',body:JSON.stringify({student,cameraReady:true,cameraConsent:true,snapshotConsent})});
     sessionStorage.setItem('securetest.testId',test.id);
     qi=0;answers=Array(test.questions.length).fill(null);marked.clear();violations=0;submitted=false;examStarted=true;
     seconds=started.durationSeconds||test.durationMinutes*60;
