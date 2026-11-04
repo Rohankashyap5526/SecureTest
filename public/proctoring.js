@@ -49,7 +49,7 @@ function setStatus(message) {
 function setWarnings(count) {
   warningCount = count;
   const el = document.getElementById('stpWarnings');
-  if (el) el.textContent = 'Confirmed warnings: ' + count + ' / 2';
+  if (el) el.textContent = count >= 3 ? 'Termination threshold reached (3/3)' : 'Warnings: ' + count + ' / 2';
 }
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -117,6 +117,7 @@ async function reportViolation(eventType, detector = 'browser', confidence = nul
     }
     if (result.terminated && typeof window.secureTestAutoTerminate === 'function') {
       active = false;
+      stop();
       window.secureTestAutoTerminate();
     }
     return result;
