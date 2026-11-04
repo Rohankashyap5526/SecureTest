@@ -144,7 +144,7 @@ async function getAllTests() {
     : { id: q.id, type: 'mcq', question: q.question_text, options: Array.isArray(q.options) ? q.options : [], answer: Number(q.correct_answer), marks: Number(q.marks) || 1 }) }));
 }
 
-mountProctoring(app, { supabase, getTest, normalizeRollNumber });
+mountProctoring(app, { supabase, getTest, normalizeRollNumber, requireAdmin });
 
 // ------------------------- Admin auth -------------------------
 app.post('/api/admin/login', (req, res) => {
