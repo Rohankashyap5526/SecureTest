@@ -223,6 +223,7 @@ function stop() {
   const panel = document.getElementById(PANEL_ID);
   if (panel) panel.classList.remove('stp-live');
 }
+ensurePanel();
 window.SecureTestProctoring = {
   prepare, activate, stop, reportViolation,
   get warningCount() { return warningCount; }
