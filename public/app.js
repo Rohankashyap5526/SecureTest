@@ -1,4 +1,4 @@
-let tests=[],test=null,qi=0,answers=[],marked=new Set(),seconds=0,timer=null,violations=0,editId=null,allResults=[],submitted=false,examStarted=false,saveTimer=null;
+let tests=[],test=null,qi=0,answers=[],marked=new Set(),seconds=0,timer=null,violations=0,editId=null,allResults=[],submitted=false,examStarted=false,saveTimer=null,proctoringEvents=[];
 const $=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 
@@ -14,7 +14,7 @@ const ROUTES={
 };
 const PAGE_FOR_PATH={
   '/':'home','/assessments':'tests','/candidate':'student','/instructions':'instructions',
-  '/exam':'exam','/submitted':'done','/admin/login':'adminLogin','/admin':'admin','/admin/assessments':'admin','/admin/results':'admin',
+  '/exam':'exam','/submitted':'done','/admin/login':'adminLogin','/admin':'admin','/admin/assessments':'admin','/admin/results':'admin','/admin/proctoring':'admin',
   '/admin/assessments/new':'editor'
 };
 let routeGuardRunning=false;
@@ -45,7 +45,7 @@ function renderRoute(path=location.pathname){
 
   if(pageId==='admin'){
     const p=normalizePath(location.pathname);
-    const tab=p==='/admin/results'?'resultsTab':p==='/admin/assessments'?'testsTab':'dashboard';
+    const tab=p==='/admin/results'?'resultsTab':p==='/admin/assessments'?'testsTab':p==='/admin/proctoring'?'proctoringTab':'dashboard';
     setAdminTab(tab,false);
     if(!routeGuardRunning) guardAdminRoute();
   }
@@ -114,11 +114,12 @@ function setAdminTab(id,refresh=true){
   document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden'));
   $(id)?.classList.remove('hidden');
   document.querySelectorAll('.side-link').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));
-  $('adminCrumb').textContent=id==='dashboard'?'Overview':id==='testsTab'?'Assessments':'Results';
+  $('adminCrumb').textContent=id==='dashboard'?'Overview':id==='testsTab'?'Assessments':id==='resultsTab'?'Results':'Proctoring';
   if(refresh) adminData();
+  if(id==='proctoringTab') loadProctoringEvents();
 }
 function adminTab(id){
-  const path=id==='testsTab'?'/admin/assessments':id==='resultsTab'?'/admin/results':'/admin';
+  const path=id==='testsTab'?'/admin/assessments':id==='resultsTab'?'/admin/results':id==='proctoringTab'?'/admin/proctoring':'/admin';
   navigate(path);
   adminData();
 }
@@ -143,6 +144,32 @@ function toggleQuestionType(select){const card=select.closest('.question-editor'
 async function saveTest(){const title=$('tt').value.trim(),duration=Number($('td').value);const qs=[...document.querySelectorAll('.question-editor')].map(d=>{const type=d.querySelector('.qt').value;if(type==='code_output')return{type,question:d.querySelector('.qq').value.trim(),codeSnippet:d.querySelector('.qcode').value.trim(),expectedOutput:d.querySelector('.qoutput').value.trim()};return{type:'mcq',question:d.querySelector('.qq').value.trim(),options:[...d.querySelectorAll('.qo')].map(x=>x.value.trim()),answer:Number(d.querySelector('.qa').value)}});if(!title)return toast('Enter an assessment title.');if(!duration||duration<1)return toast('Duration must be at least 1 minute.');if(!qs.length)return toast('Add at least one question.');if(qs.some(q=>!q.question))return toast('Complete every question.');if(qs.some(q=>q.type==='mcq'&&q.options.some(o=>!o)))return toast('Complete every MCQ option.');if(qs.some(q=>q.type==='code_output'&&(!q.codeSnippet||!q.expectedOutput)))return toast('Complete the code and expected output.');try{await api('/api/admin/tests',{method:'POST',body:JSON.stringify({id:editId,title,description:$('tx').value.trim(),durationMinutes:duration,questions:qs})});toast('Assessment saved successfully');await adminData();adminTab('testsTab')}catch(e){toast(e.message)}}
 
 async function delTest(id){if(!confirm('Delete this assessment? This cannot be undone.'))return;try{await api(`/api/admin/tests/${encodeURIComponent(id)}`,{method:'DELETE'});await adminData();toast('Assessment deleted')}catch(e){toast(e.message)}}
+async function loadProctoringEvents(){
+  const body=$('proctoringEvents');
+  if(!body)return;
+  body.innerHTML='<tr><td colspan="6">Loading proctoring events…</td></tr>';
+  try{
+    const data=await api('/api/admin/proctoring/events');
+    proctoringEvents=data.events||[];
+    $('proctoringEventCount').textContent=proctoringEvents.length+' recorded events (latest 500)';
+    body.innerHTML=proctoringEvents.length?proctoringEvents.map(event=>{
+      const session=Array.isArray(event.exam_sessions)?event.exam_sessions[0]:(event.exam_sessions||{});
+      const candidate=session.candidate||{};
+      const snapshot=event.snapshotUrl?'<a href="'+esc(event.snapshotUrl)+'" target="_blank" rel="noopener noreferrer">View snapshot</a>':'Not stored';
+      return '<tr><td>'+esc(candidate.fullName||'Candidate')+'</td><td>'+esc(session.roll_number||'—')+'</td><td>'+esc(event.event_type)+'</td><td>'+esc(event.violation_number)+'</td><td>'+esc(new Date(event.created_at).toLocaleString())+'</td><td>'+snapshot+'</td></tr>';
+    }).join(''):'<tr><td colspan="6" style="text-align:center;padding:24px">No proctoring events recorded.</td></tr>';
+  }catch(error){
+    body.innerHTML='<tr><td colspan="6">Could not load proctoring events: '+esc(error.message)+'</td></tr>';
+  }
+}
+async function cleanupProctoringSnapshots(){
+  if(!confirm('Delete all incident snapshots whose 30-day retention period has passed? Event metadata will remain.'))return;
+  try{
+    const result=await api('/api/admin/proctoring/cleanup',{method:'POST',body:JSON.stringify({})});
+    toast('Deleted '+(result.deletedSnapshots||0)+' expired snapshot(s).');
+    await loadProctoringEvents();
+  }catch(error){toast(error.message)}
+}
 function filterResults(){const input=$('resultSearch');if(!input)return;const q=input.value.toLowerCase().trim();const rows=allResults.filter(r=>Object.values(r).some(v=>String(v??'').toLowerCase().includes(q)));$('resultCount').textContent=`${rows.length} result${rows.length===1?'':'s'}`;$('results').innerHTML=rows.length?rows.map(r=>`<tr><td><div class="candidate-cell"><strong>${esc(r.Full_Name)}</strong><small>${esc(r.Student_ID||'')}</small></div></td><td><span class="roll-badge">${esc(r.Roll_Number||'—')}</span></td><td>${esc(r.College_Name)}</td><td>${esc(r.Mobile_Number)}</td><td>${esc(r.Semester)}</td><td>${esc(r.Branch)}</td><td>${esc(r.Course)}</td><td>${esc(r.Test_Name)}</td><td>${r.Attempted}/${r.Total_Questions}</td><td>${r.Correct}</td><td>${r.Wrong}</td><td><span class="score">${r.Marks}/${r.Total_Marks}</span></td><td><span class="percent">${r.Percentage}%</span></td></tr>`).join(''):'<tr><td colspan="13" style="text-align:center;padding:28px;color:var(--subtle)">No matching results.</td></tr>'}
 function downloadExcel(){location.href='/api/admin/results.xlsx'}
 async function deleteStudentData(){if(!confirm('Delete ALL student data? This permanently removes every student, attempt, answer, score, roll number and submission record. Assessments and questions will NOT be deleted. This action cannot be undone.'))return;try{const d=await api('/api/admin/student-data',{method:'DELETE'});toast(`Deleted ${d.deletedStudents||0} student(s), ${d.deletedAttempts||0} attempt(s) and ${d.deletedAnswers||0} answer(s)`);await adminData()}catch(e){toast(e.message)}}
