@@ -24,7 +24,7 @@ function mountProctoring(app, { supabase, getTest, normalizeRollNumber, requireA
     try {
       const test = await getTest(req.params.id);
       if (!test) return res.status(404).json({ error: 'Assessment not found' });
-      if (req.body?.cameraReady !== true) return res.status(400).json({ error: 'Camera permission is required before starting.' });
+      if (req.body?.cameraReady !== true || req.body?.cameraConsent !== true) return res.status(400).json({ error: 'Camera permission and monitoring consent are required before starting.' });
       const student = req.body?.student || {};
       const fields = ['fullName','collegeName','rollNumber','mobileNumber','semester','branch','course'];
       if (fields.some(field => !String(student[field] || '').trim())) return res.status(400).json({ error: 'Complete all candidate details before starting.' });
