@@ -77,10 +77,10 @@ async function beginExam(){
     const student={fullName:$('fullName').value,collegeName:$('collegeName').value,rollNumber:$('rollNumber').value,mobileNumber:$('mobileNumber').value,semester:$('semester').value,branch:$('branch').value,course:$('course').value};
     const started=await api('/api/tests/'+encodeURIComponent(test.id)+'/start',{method:'POST',body:JSON.stringify({student,cameraReady:true,cameraConsent:true,snapshotConsent})});
     sessionStorage.setItem('securetest.testId',test.id);
-    qi=0;answers=Array(test.questions.length).fill(null);marked.clear();violations=0;submitted=false;examStarted=true;
+    qi=0;answers=Array.isArray(started.savedAnswers)?started.savedAnswers:Array(test.questions.length).fill(null);marked.clear();violations=Number(started.violationCount)||0;submitted=false;examStarted=true;
     seconds=started.durationSeconds||test.durationMinutes*60;
     $('examTitle').textContent=test.title;navigate('/exam');document.body.classList.add('exam');render();
-    window.SecureTestProctoring.activate(test.id);
+    window.SecureTestProctoring.activate(test.id,Number(started.violationCount)||0);
     restoreFullscreen();clearInterval(timer);
     timer=setInterval(()=>{seconds--;clock();if(seconds<=0)submitExam()},1000);clock();
   }catch(e){window.SecureTestProctoring.stop();toast(e.message||'Could not start the secure examination.')}
@@ -160,7 +160,38 @@ async function hydrateRouteState(){
   }
   const storedId=sessionStorage.getItem('securetest.testId');
   if(storedId && !test){
-    try{ test=await api(`/api/tests/${encodeURIComponent(storedId)}`); }catch{}
+    try{ test=await api('/api/tests/'+encodeURIComponent(storedId)); }catch{}
+  }
+  if(storedId && test){
+    try{
+      const session=await api('/api/proctoring/session');
+      if(session.testId===test.id && session.status==='active'){
+        const candidate=session.candidate||{};
+        $('fullName').value=candidate.fullName||'';
+        $('collegeName').value=candidate.collegeName||'';
+        $('rollNumber').value=candidate.rollNumber||'';
+        $('mobileNumber').value=candidate.mobileNumber||'';
+        $('semester').value=candidate.semester||'';
+        $('branch').value=candidate.branch||'';
+        $('course').value=candidate.course||'';
+        $('instructionName').textContent=test.title;
+        $('instructionDescription').textContent=test.description||'Professional online assessment.';
+        $('instructionQuestions').textContent=test.questions.length;
+        $('instructionDuration').textContent=Math.max(1,Math.ceil((new Date(session.expiresAt).getTime()-Date.now())/60000))+' min remaining';
+        answers=Array.isArray(session.savedAnswers)?session.savedAnswers:Array(test.questions.length).fill(null);
+        violations=Number(session.violationCount)||0;
+        navigate('/instructions',{replace:true});
+        return;
+      }
+      if(session.testId===test.id && session.status==='terminated'){
+        answers=Array.isArray(session.savedAnswers)?session.savedAnswers:Array(test.questions.length).fill(null);
+        violations=Number(session.violationCount)||3;
+        examStarted=true;
+        submitted=false;
+        window.secureTestAutoTerminate?.();
+        return;
+      }
+    }catch(e){ /* No live session cookie: continue with the normal public route. */ }
   }
   renderRoute(location.pathname);
   if(location.pathname==='/assessments') loadTests();
