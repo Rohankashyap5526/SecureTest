@@ -353,9 +353,9 @@ app.post('/api/tests/:id/check-eligibility', async (req, res) => {
     const test = await getTest(req.params.id);
     if (!test) return res.status(404).json({ error: 'Test not found' });
     const rollNumber = normalizeRollNumber(req.body?.rollNumber);
-    const mobileNumber = String(req.body?.mobileNumber || '').replace(/\\D/g, '');
+    const mobileNumber = String(req.body?.mobileNumber || '').replace(/\D/g, '');
     if (!rollNumber) return res.status(400).json({ error: 'University / College Roll No. is required' });
-    if (!/^\\d{10}$/.test(mobileNumber)) return res.status(400).json({ error: 'Enter a valid 10-digit mobile number.' });
+    if (!/^\d{10}$/.test(mobileNumber)) return res.status(400).json({ error: 'Enter a valid 10-digit mobile number.' });
     const { data: phoneOwner, error: phoneError } = await supabase.from('students')
       .select('id,roll_number').eq('mobile_number', mobileNumber).maybeSingle();
     if (phoneError) throw phoneError;
@@ -419,8 +419,8 @@ app.post('/api/tests/:id/submit', async (req, res) => {
     const wrong = Math.max(0, attempted - correctCount);
     const percentage = totalMarks ? Number(((correct / totalMarks) * 100).toFixed(2)) : 0;
 
-    const mobileNumber = String(student.mobileNumber || '').replace(/\\D/g, '');
-    if (!/^\\d{10}$/.test(mobileNumber)) return res.status(400).json({ error: 'Enter a valid 10-digit mobile number.' });
+    const mobileNumber = String(student.mobileNumber || '').replace(/\D/g, '');
+    if (!/^\d{10}$/.test(mobileNumber)) return res.status(400).json({ error: 'Enter a valid 10-digit mobile number.' });
     const { data: phoneOwner, error: phoneError } = await supabase.from('students')
       .select('id,roll_number').eq('mobile_number', mobileNumber).maybeSingle();
     if (phoneError) throw phoneError;
