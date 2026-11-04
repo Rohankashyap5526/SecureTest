@@ -30,8 +30,8 @@ function mountProctoring(app, { supabase, getTest, normalizeRollNumber, requireA
       if (fields.some(field => !String(student[field] || '').trim())) return res.status(400).json({ error: 'Complete all candidate details before starting.' });
 
       const rollNumber = normalizeRollNumber(student.rollNumber);
-      const mobileNumber = String(student.mobileNumber || '').replace(/\\D/g, '');
-      if (!/^\\d{10}$/.test(mobileNumber)) return res.status(400).json({ error: 'Enter a valid 10-digit mobile number.' });
+      const mobileNumber = String(student.mobileNumber || '').replace(/\D/g, '');
+      if (!/^\d{10}$/.test(mobileNumber)) return res.status(400).json({ error: 'Enter a valid 10-digit mobile number.' });
       const { data: phoneOwner, error: phoneError } = await supabase.from('students')
         .select('id,roll_number').eq('mobile_number', mobileNumber).maybeSingle();
       if (phoneError) throw phoneError;
