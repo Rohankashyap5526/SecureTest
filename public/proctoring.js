@@ -197,14 +197,14 @@ async function prepare() {
   panel.classList.add('stp-live');
   return snapshotConsent;
 }
-function activate(id) {
+function activate(id, initialWarnings = 0) {
   testId = id;
   active = true;
   multiSince = 0;
   missingSince = 0;
   phoneHits = 0;
   lastSent.clear();
-  setWarnings(0);
+  setWarnings(initialWarnings);
   setStatus('Proctoring active. Keep your face visible and do not use a phone.');
   const panel = ensurePanel();
   const header = document.querySelector('#exam .exam-header');
