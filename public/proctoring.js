@@ -114,6 +114,18 @@ async function reportViolation(eventType, detector = 'browser', confidence = nul
       setWarnings(result.violationCount);
       setStatus(result.terminated ? 'Examination ended after the third confirmed violation.' :
         'Proctoring active. Please remain visible and alone.');
+      if (!result.terminated && typeof window.toast === 'function') {
+        const reasons = {
+          multiple_faces: 'More than one face was detected in the camera view.',
+          face_missing: 'Your face has not been visible for several seconds.',
+          phone_detected: 'A possible mobile phone was detected.',
+          tab_hidden: 'You switched away from the examination tab.',
+          window_blur: 'The examination window lost focus.',
+          fullscreen_exit: 'You exited full-screen mode.',
+          copy_attempt: 'A restricted copy or keyboard action was detected.'
+        };
+        window.toast('Warning ' + result.violationCount + ' of 2: ' + (reasons[eventType] || 'Suspicious activity detected.'));
+      }
     }
     if (result.terminated && typeof window.secureTestAutoTerminate === 'function') {
       active = false;
