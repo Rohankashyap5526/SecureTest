@@ -376,7 +376,7 @@ app.post('/api/tests/:id/submit', async (req, res) => {
     if (requiredFields.some(field => !String(student[field] || '').trim())) return res.status(400).json({ error: 'All candidate fields are required' });
 
     const rollNumber = normalizeRollNumber(student.rollNumber);
-    const answers = Array.isArray(req.body?.answers) ? req.body.answers : (Array.isArray(req.examSession?.saved_answers) ? req.examSession.saved_answers : []);
+    const answers = Array.isArray(req.examSession?.saved_answers) ? req.examSession.saved_answers : (Array.isArray(req.body?.answers) ? req.body.answers : []);
     let correct = 0;
     let totalMarks = 0;
     const answerRows = [];
