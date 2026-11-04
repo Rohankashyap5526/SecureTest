@@ -24,6 +24,8 @@ create table if not exists public.exam_sessions (
 
 create unique index if not exists exam_sessions_one_active_candidate
   on public.exam_sessions(test_id, student_id) where status = 'active';
+create unique index if not exists exam_sessions_one_attempt_per_candidate
+  on public.exam_sessions(test_id, student_id);
 create index if not exists exam_sessions_status_expiry_idx
   on public.exam_sessions(status, expires_at);
 create index if not exists exam_sessions_roll_test_idx
