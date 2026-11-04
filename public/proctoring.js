@@ -134,6 +134,24 @@ async function reportViolation(eventType, detector = 'browser', confidence = nul
     }
     return result;
   } catch (error) {
+    // The RPC may have committed even if the HTTP response was lost. Re-read
+    // the server session so the browser cannot miss warning 3 / termination.
+    try {
+      const check = await fetch('/api/proctoring/session', { credentials: 'include' });
+      if (check.ok) {
+        const session = await check.json();
+        setWarnings(Number(session.violationCount) || 0);
+        if (session.status === 'terminated') {
+          setStatus('Examination ended after the third confirmed violation.');
+          active = false;
+          stop();
+          if (typeof window.secureTestAutoTerminate === 'function') window.secureTestAutoTerminate();
+          return { accepted: true, violationCount: Number(session.violationCount) || 3, terminated: true, status: 'terminated' };
+        }
+      }
+    } catch (syncError) {
+      console.error('Could not synchronize proctoring session:', syncError);
+    }
     setStatus('Proctoring connection problem. Contact the invigilator.');
     console.error('Proctoring event failed:', error);
     return null;
