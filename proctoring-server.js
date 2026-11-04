@@ -10,7 +10,7 @@ function tokenHash(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
 }
 
-function mountProctoring(app, { supabase, getTest, normalizeRollNumber }) {
+function mountProctoring(app, { supabase, getTest, normalizeRollNumber, requireAdmin }) {
   async function findSession(req) {
     const token = cookieValue(req, 'securetest.exam') || req.get('x-securetest-session');
     if (!token) return null;
@@ -186,6 +186,51 @@ function mountProctoring(app, { supabase, getTest, normalizeRollNumber }) {
       console.error('Proctoring event failed:', error);
       if (uploadedPath) await supabase.storage.from('proctoring-incidents').remove([uploadedPath]).catch(() => {});
       return res.status(500).json({ error: 'Could not record proctoring event.' });
+    }
+  });
+
+  app.get('/api/admin/proctoring/events', requireAdmin, async (req, res) => {
+    try {
+      const { data, error } = await supabase.from('proctoring_events')
+        .select('id,event_type,violation_number,details,snapshot_path,created_at,exam_sessions(test_id,roll_number,candidate)')
+        .order('created_at', { ascending: false }).limit(500);
+      if (error) throw error;
+      const events = await Promise.all((data || []).map(async event => {
+        let snapshotUrl = null;
+        if (event.snapshot_path) {
+          const { data: signed, error: signedError } = await supabase.storage
+            .from('proctoring-incidents').createSignedUrl(event.snapshot_path, 300);
+          if (!signedError) snapshotUrl = signed?.signedUrl || null;
+        }
+        return { ...event, snapshotUrl };
+      }));
+      return res.json({ events });
+    } catch (error) {
+      console.error('Admin proctoring event query failed:', error);
+      return res.status(500).json({ error: 'Could not load proctoring events.' });
+    }
+  });
+
+  app.post('/api/admin/proctoring/cleanup', requireAdmin, async (req, res) => {
+    try {
+      const now = new Date().toISOString();
+      const { data, error } = await supabase.from('proctoring_events')
+        .select('id,snapshot_path').not('snapshot_path', 'is', null).lt('snapshot_expires_at', now);
+      if (error) throw error;
+      const rows = data || [];
+      const paths = rows.map(row => row.snapshot_path).filter(Boolean);
+      if (paths.length) {
+        const { error: removeError } = await supabase.storage.from('proctoring-incidents').remove(paths);
+        if (removeError) throw removeError;
+        const ids = rows.map(row => row.id);
+        const { error: updateError } = await supabase.from('proctoring_events')
+          .update({ snapshot_path: null }).in('id', ids);
+        if (updateError) throw updateError;
+      }
+      return res.json({ ok: true, deletedSnapshots: paths.length });
+    } catch (error) {
+      console.error('Proctoring retention cleanup failed:', error);
+      return res.status(500).json({ error: 'Could not clean up expired incident snapshots.' });
     }
   });
 
