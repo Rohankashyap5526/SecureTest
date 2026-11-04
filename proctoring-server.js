@@ -30,6 +30,16 @@ function mountProctoring(app, { supabase, getTest, normalizeRollNumber, requireA
       if (fields.some(field => !String(student[field] || '').trim())) return res.status(400).json({ error: 'Complete all candidate details before starting.' });
 
       const rollNumber = normalizeRollNumber(student.rollNumber);
+      const currentSession = await findSession(req);
+      if (currentSession && currentSession.test_id === test.id && currentSession.roll_number === rollNumber &&
+          currentSession.status === 'active' && new Date(currentSession.expires_at).getTime() > Date.now()) {
+        return res.json({
+          ok: true, sessionId: currentSession.id, expiresAt: currentSession.expires_at,
+          durationSeconds: Math.max(0, Math.ceil((new Date(currentSession.expires_at).getTime() - Date.now()) / 1000)),
+          savedAnswers: currentSession.saved_answers || [], violationCount: currentSession.violation_count || 0,
+          resumed: true
+        });
+      }
       const { data: oldStudent, error: oldStudentError } = await supabase.from('students')
         .select('id').eq('roll_number', rollNumber).maybeSingle();
       if (oldStudentError) throw oldStudentError;
@@ -92,9 +102,15 @@ function mountProctoring(app, { supabase, getTest, normalizeRollNumber, requireA
     try {
       const session = await findSession(req);
       if (!session) return res.status(401).json({ error: 'Examination session not found.' });
+      if (session.status === 'active' && new Date(session.expires_at).getTime() <= Date.now()) {
+        await supabase.from('exam_sessions').update({ status: 'expired' }).eq('id', session.id);
+        session.status = 'expired';
+      }
       return res.json({
         status: session.status, violationCount: session.violation_count,
-        expiresAt: session.expires_at, snapshotConsent: session.snapshot_consent
+        expiresAt: session.expires_at, snapshotConsent: session.snapshot_consent,
+        testId: session.test_id, candidate: session.candidate,
+        savedAnswers: session.saved_answers || []
       });
     } catch (error) {
       console.error('Session verification failed:', error);
