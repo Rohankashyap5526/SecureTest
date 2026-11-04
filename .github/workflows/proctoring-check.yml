@@ -1,0 +1,24 @@
+name: SecureTest proctoring checks
+
+on:
+  push:
+    branches: [security-hardening]
+  pull_request:
+    branches: [security-hardening]
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Check server JavaScript syntax
+        run: |
+          node --check server.js
+          node --check proctoring-server.js
+          node --check public/app.js
+          node --check public/proctoring.js
