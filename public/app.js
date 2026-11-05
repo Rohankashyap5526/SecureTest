@@ -155,9 +155,14 @@ async function loadProctoringEvents(){
     body.innerHTML=proctoringEvents.length?proctoringEvents.map(event=>{
       const session=Array.isArray(event.exam_sessions)?event.exam_sessions[0]:(event.exam_sessions||{});
       const candidate=session.candidate||{};
-      const snapshot=event.snapshotUrl?'<a href="'+esc(event.snapshotUrl)+'" target="_blank" rel="noopener noreferrer">View snapshot</a>':'Not stored';
-      return '<tr><td>'+esc(candidate.fullName||'Candidate')+'</td><td>'+esc(session.roll_number||'—')+'</td><td>'+esc(event.event_type)+'</td><td>'+esc(event.violation_number)+'</td><td>'+esc(new Date(event.created_at).toLocaleString())+'</td><td>'+snapshot+'</td></tr>';
-    }).join(''):'<tr><td colspan="6" style="text-align:center;padding:24px">No proctoring events recorded.</td></tr>';
+      const snapshot=event.snapshotUrl?'<a href="'+esc(event.snapshotUrl)+'" target="_blank" rel="noopener noreferrer">View snapshot</a>':(session.snapshot_consent===true?'No image attached':'Not stored');
+      const consent=session.snapshot_consent===true?'<span class="consent-state granted">Granted</span>':'<span class="consent-state">Not granted</span>';
+      const count=Number(event.violation_number)||0;
+      const warning='<span class="warning-count '+(count>=3?'terminated':'')+'">'+count+(count>=3?' · termination threshold':'')+'</span>';
+      return '<tr><td>'+esc(candidate.fullName||'Candidate')+'</td><td>'+esc(session.roll_number||'—')+'</td><td>'+esc(event.event_type)+'</td><td>'+warning+'</td><td>'+esc(new Date(event.created_at).toLocaleString())+'</td><td>'+consent+'</td><td>'+snapshot+'</td></tr>';
+    }).join(''):'<tr><td colspan="7" style="text-align:center;padding:24px">No proctoring events recorded.</td></tr>';
+    const wrap=body.closest('.table-wrap');
+    if(wrap)wrap.scrollLeft=0;
   }catch(error){
     body.innerHTML='<tr><td colspan="7">Could not load proctoring events: '+esc(error.message)+'</td></tr>';
   }
