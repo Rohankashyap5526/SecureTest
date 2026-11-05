@@ -147,7 +147,7 @@ async function delTest(id){if(!confirm('Delete this assessment? This cannot be u
 async function loadProctoringEvents(){
   const body=$('proctoringEvents');
   if(!body)return;
-  body.innerHTML='<tr><td colspan="6">Loading proctoring events…</td></tr>';
+  body.innerHTML='<tr><td colspan="7">Loading proctoring events…</td></tr>';
   try{
     const data=await api('/api/admin/proctoring/events');
     proctoringEvents=data.events||[];
@@ -159,7 +159,7 @@ async function loadProctoringEvents(){
       return '<tr><td>'+esc(candidate.fullName||'Candidate')+'</td><td>'+esc(session.roll_number||'—')+'</td><td>'+esc(event.event_type)+'</td><td>'+esc(event.violation_number)+'</td><td>'+esc(new Date(event.created_at).toLocaleString())+'</td><td>'+snapshot+'</td></tr>';
     }).join(''):'<tr><td colspan="6" style="text-align:center;padding:24px">No proctoring events recorded.</td></tr>';
   }catch(error){
-    body.innerHTML='<tr><td colspan="6">Could not load proctoring events: '+esc(error.message)+'</td></tr>';
+    body.innerHTML='<tr><td colspan="7">Could not load proctoring events: '+esc(error.message)+'</td></tr>';
   }
 }
 async function cleanupProctoringSnapshots(){
