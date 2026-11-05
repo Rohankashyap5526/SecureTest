@@ -216,7 +216,7 @@ function mountProctoring(app, { supabase, getTest, normalizeRollNumber, requireA
   app.get('/api/admin/proctoring/events', requireAdmin, async (req, res) => {
     try {
       const { data, error } = await supabase.from('proctoring_events')
-        .select('id,event_type,violation_number,details,snapshot_path,created_at,exam_sessions(test_id,roll_number,candidate)')
+        .select('id,event_type,violation_number,details,snapshot_path,created_at,exam_sessions(test_id,roll_number,candidate,snapshot_consent)')
         .order('created_at', { ascending: false }).limit(500);
       if (error) throw error;
       const events = await Promise.all((data || []).map(async event => {
