@@ -1,7 +1,38 @@
+// Camera + browser proctoring (runs entirely on the candidate's device).
+//
+// Strikes (counted by the server, 3 = termination): multiple_faces, phone_detected,
+// face_missing, camera_lost, tab_hidden, window_blur, fullscreen_exit.
+// Review-only flags (logged for the invigilator, never a strike): looking_away,
+// copy_attempt, screenshot_key, multi_monitor.
 const PANEL_ID = 'securetestProctorPanel';
-let stream = null, video = null, faceDetector = null, objectModel = null;
-let active = false, loopTimer = null, snapshotConsent = false, testId = null;
-let multiSince = 0, missingSince = 0, phoneHits = 0, lastSent = new Map(), warningCount = 0;
+const MP_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite';
+const TFJS_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js';
+const COCO_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js';
+
+const REVIEW_ONLY = new Set(['looking_away', 'copy_attempt', 'screenshot_key', 'multi_monitor']);
+const TUNING = {
+  tickMs: 700,                 // face check cadence
+  objectEvery: 4,              // phone check every 4th tick (~2.8 s): heavier model
+  faceMinScore: 0.55,
+  secondFaceMinRatio: 0.2,     // 2nd face must be >= 20% of the main face's area (ignores far-away people/posters)
+  multiConsecutive: 3,         // ~2 s of consecutive frames
+  faceMissingMs: 7000,
+  phoneMinScore: 0.55,
+  phoneConsecutive: 2,
+  lookAwayYaw: 0.6,            // nose offset / eye distance
+  lookAwayMs: 6000,
+  cameraLostMs: 5000,
+  heartbeatMs: 20000,
+  cooldownMs: 18000,           // per strike type
+  reviewCooldownMs: 12000
+};
+
+let stream = null, video = null, faceDetector = null, objectModel = null, modelsPromise = null;
+let active = false, loopTimer = null, hbTimer = null, reacquiring = false, snapshotConsent = false, testId = null;
+let multiCount = 0, missingSince = 0, phoneHits = 0, lookAwaySince = 0, cameraBadSince = 0, tickCount = 0, detectorFaults = 0;
+let lastSent = new Map(), warningCount = 0, maxViolations = 3;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function ensurePanel() {
   let panel = document.getElementById(PANEL_ID);
@@ -49,154 +80,236 @@ function setStatus(message) {
 function setWarnings(count) {
   warningCount = count;
   const el = document.getElementById('stpWarnings');
-  if (el) el.textContent = count >= 3 ? 'Termination threshold reached (3/3)' : 'Warnings: ' + count + ' / 2';
+  if (el) el.textContent = count >= maxViolations ? 'Termination threshold reached (' + maxViolations + '/' + maxViolations + ')' : 'Warnings: ' + count + ' / ' + (maxViolations - 1);
+}
+
+async function withRetry(fn, tries = 3) {
+  for (let i = 0; ; i += 1) {
+    try { return await fn(); } catch (error) {
+      if (i >= tries - 1) throw error;
+      await sleep(700 * (i + 1) + Math.random() * 500); // jitter: 150 laptops must not retry in lockstep
+    }
+  }
 }
 function loadScript(src) {
   return new Promise((resolve, reject) => {
-    const old = Array.from(document.scripts).find(item => item.src === src);
-    if (old) {
-      if (old.dataset.loaded === 'yes') return resolve();
-      old.addEventListener('load', resolve, { once: true });
-      old.addEventListener('error', reject, { once: true });
-      return;
-    }
+    const existing = Array.from(document.scripts).find((item) => item.src === src);
+    if (existing && existing.dataset.loaded === 'yes') return resolve();
+    if (existing) existing.remove(); // a failed/pending element can never fire again: replace it
     const script = document.createElement('script');
     script.src = src;
     script.async = true;
     script.onload = () => { script.dataset.loaded = 'yes'; resolve(); };
-    script.onerror = () => reject(new Error('AI library download failed'));
+    script.onerror = () => { script.remove(); reject(new Error('AI library download failed')); };
     document.head.appendChild(script);
   });
 }
 async function loadModels() {
-  setStatus('Loading local face and phone detection models…');
-  const visionModule = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
-  const vision = await visionModule.FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-  );
-  faceDetector = await visionModule.FaceDetector.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
-      delegate: 'CPU'
-    },
+  setStatus('Loading face and phone detection models…');
+  // Explicit .mjs file: a bare package URL may resolve to a CommonJS build.
+  const mp = await withRetry(() => import(MP_BASE + '/vision_bundle.mjs'));
+  const fileset = await withRetry(() => mp.FilesetResolver.forVisionTasks(MP_BASE + '/wasm'));
+  const create = (delegate) => mp.FaceDetector.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: FACE_MODEL, delegate },
     runningMode: 'VIDEO',
-    minDetectionConfidence: 0.65
+    minDetectionConfidence: TUNING.faceMinScore
   });
-  await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js');
-  await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js');
-  objectModel = await window.cocoSsd.load({ base: 'lite_mobilenet_v2' });
+  try { faceDetector = await create('GPU'); } catch { faceDetector = await withRetry(() => create('CPU')); }
+  await withRetry(() => loadScript(TFJS_URL));
+  await withRetry(() => loadScript(COCO_URL));
+  objectModel = await withRetry(() => window.cocoSsd.load({ base: 'lite_mobilenet_v2' }));
+}
+// Start downloading while the candidate reads the instructions, so the Start click is fast
+// even when 150 candidates press it together.
+function preload() {
+  if (!modelsPromise) modelsPromise = loadModels().catch((error) => { modelsPromise = null; faceDetector = null; objectModel = null; throw error; });
+  return modelsPromise;
+}
+
+function trackLive() {
+  return !!stream && stream.getVideoTracks().some((t) => t.readyState === 'live' && t.enabled && !t.muted);
 }
 function captureSnapshot() {
   if (!snapshotConsent || !video || !video.videoWidth) return null;
   const canvas = document.createElement('canvas');
-  canvas.width = 640;
-  canvas.height = Math.max(1, Math.round(640 * video.videoHeight / video.videoWidth));
+  canvas.width = 480;
+  canvas.height = Math.max(1, Math.round(480 * video.videoHeight / video.videoWidth));
   canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.58);
+  return canvas.toDataURL('image/jpeg', 0.6);
 }
-async function reportViolation(eventType, detector = 'browser', confidence = null) {
+
+function handleTermination(reason) {
+  if (!active) return;
+  active = false;
+  stop();
+  if (typeof window.secureTestAutoTerminate === 'function') window.secureTestAutoTerminate(reason);
+}
+
+async function postJson(url, payload) {
+  const response = await fetch(url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  let data = {};
+  try { data = await response.json(); } catch { /* empty */ }
+  return { ok: response.ok, status: response.status, data };
+}
+
+const REASONS = {
+  multiple_faces: 'More than one person was detected in the camera view.',
+  face_missing: 'Your face has not been visible for several seconds.',
+  phone_detected: 'A possible mobile phone was detected.',
+  camera_lost: 'The camera stopped working or was blocked.',
+  tab_hidden: 'You switched away from the examination tab.',
+  window_blur: 'The examination window lost focus.',
+  fullscreen_exit: 'You exited full-screen mode.'
+};
+
+async function reportViolation(eventType, detector = 'browser', confidence = null, note = null) {
   if (!active || !testId) return null;
+  const reviewOnly = REVIEW_ONLY.has(eventType);
   const now = Date.now();
-  if (now - (lastSent.get(eventType) || 0) < 18000) return null;
+  if (now - (lastSent.get(eventType) || 0) < (reviewOnly ? TUNING.reviewCooldownMs : TUNING.cooldownMs)) return null;
   lastSent.set(eventType, now);
   const payload = { eventType, detector, confidence };
-  const snapshot = captureSnapshot();
-  if (snapshot) payload.snapshot = snapshot;
-  try {
-    const response = await fetch('/api/proctoring/events', {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Could not record event');
-    if (result.accepted) {
-      setWarnings(result.violationCount);
-      setStatus(result.terminated ? 'Examination ended after the third confirmed violation.' :
-        'Proctoring active. Please remain visible and alone.');
-      if (!result.terminated && typeof window.toast === 'function') {
-        const reasons = {
-          multiple_faces: 'More than one face was detected in the camera view.',
-          face_missing: 'Your face has not been visible for several seconds.',
-          phone_detected: 'A possible mobile phone was detected.',
-          tab_hidden: 'You switched away from the examination tab.',
-          window_blur: 'The examination window lost focus.',
-          fullscreen_exit: 'You exited full-screen mode.',
-          copy_attempt: 'A restricted copy or keyboard action was detected.'
-        };
-        window.toast('Warning ' + result.violationCount + ' of 2: ' + (reasons[eventType] || 'Suspicious activity detected.'));
-      }
-    }
-    if (result.terminated && typeof window.secureTestAutoTerminate === 'function') {
-      active = false;
-      stop();
-      window.secureTestAutoTerminate();
-    }
-    return result;
-  } catch (error) {
-    // The RPC may have committed even if the HTTP response was lost. Re-read
-    // the server session so the browser cannot miss warning 3 / termination.
+  if (note) payload.note = note;
+  if (!reviewOnly) { const snapshot = captureSnapshot(); if (snapshot) payload.snapshot = snapshot; }
+
+  // A strike must not be lost to a network blip: retry a few times.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      const check = await fetch('/api/proctoring/session', { credentials: 'include' });
-      if (check.ok) {
-        const session = await check.json();
-        setWarnings(Number(session.violationCount) || 0);
-        if (session.status === 'terminated') {
-          setStatus('Examination ended after the third confirmed violation.');
-          active = false;
-          stop();
-          if (typeof window.secureTestAutoTerminate === 'function') window.secureTestAutoTerminate();
-          return { accepted: true, violationCount: Number(session.violationCount) || 3, terminated: true, status: 'terminated' };
+      const { ok, status, data: result } = await postJson('/api/proctoring/events', payload);
+      if (status === 403) { await checkSession(); return null; }
+      if (!ok) throw new Error(result.error || 'Could not record event');
+      if (result.maxViolations) { maxViolations = result.maxViolations; }
+      if (result.accepted && result.counted) {
+        setWarnings(result.violationCount);
+        setStatus(result.terminated ? 'Examination ended after the final confirmed violation.' : 'Proctoring active. Please remain visible and alone.');
+        if (!result.terminated && typeof window.toast === 'function') {
+          window.toast('Warning ' + result.violationCount + ' of ' + (maxViolations - 1) + ': ' + (REASONS[eventType] || 'Suspicious activity detected.'));
         }
       }
-    } catch (syncError) {
-      console.error('Could not synchronize proctoring session:', syncError);
+      if (result.terminated) handleTermination('terminated');
+      return result;
+    } catch (error) {
+      if (attempt === 2) console.error('Proctoring event failed:', error);
+      else await sleep(900 * (attempt + 1));
     }
-    setStatus('Proctoring connection problem. Contact the invigilator.');
-    console.error('Proctoring event failed:', error);
-    return null;
   }
+  await checkSession(); // the RPC may have committed even though the response was lost
+  return null;
+}
+
+async function checkSession() {
+  try {
+    const check = await fetch('/api/proctoring/session', { credentials: 'include' });
+    if (!check.ok) return;
+    const session = await check.json();
+    if (session.maxViolations) maxViolations = session.maxViolations;
+    setWarnings(Number(session.violationCount) || 0);
+    if (typeof window.secureTestSync === 'function') window.secureTestSync(session);
+    if (session.status === 'terminated') handleTermination('terminated');
+    else if (session.status === 'expired') handleTermination('expired');
+  } catch (error) { console.error('Could not synchronize proctoring session:', error); }
+}
+
+// ---- detection ----
+function faceArea(d) { const b = d.boundingBox || {}; return Math.max(0, (b.width || 0) * (b.height || 0)); }
+function yawRatio(d) {
+  const k = d.keypoints || []; // [eye, eye, nose tip, mouth, ear, ear], normalised 0..1
+  if (k.length < 3) return 0;
+  const eyeDist = Math.abs(k[0].x - k[1].x);
+  if (eyeDist < 0.01) return 0;
+  return (k[2].x - (k[0].x + k[1].x) / 2) / eyeDist;
+}
+function analyzeFaces(now) {
+  const result = faceDetector.detectForVideo(video, performance.now());
+  const faces = (result.detections || []).filter((d) => (d.categories?.[0]?.score || 0) >= TUNING.faceMinScore)
+    .sort((a, b) => faceArea(b) - faceArea(a));
+
+  // 1) more than one real person close to the screen
+  const second = faces[1];
+  if (second && faceArea(second) >= TUNING.secondFaceMinRatio * faceArea(faces[0])) {
+    multiCount += 1;
+    if (multiCount >= TUNING.multiConsecutive) { multiCount = 0; reportViolation('multiple_faces', 'mediapipe-face', second.categories[0].score); }
+  } else multiCount = 0;
+
+  // 2) nobody in front of the camera
+  if (faces.length === 0) {
+    if (!missingSince) missingSince = now;
+    if (now - missingSince >= TUNING.faceMissingMs) { missingSince = now; reportViolation('face_missing', 'mediapipe-face', null); }
+  } else missingSince = 0;
+
+  // 3) head turned away for a long time (review-only: glancing at a neighbour / second screen)
+  if (faces.length === 1 && Math.abs(yawRatio(faces[0])) > TUNING.lookAwayYaw) {
+    if (!lookAwaySince) lookAwaySince = now;
+    if (now - lookAwaySince >= TUNING.lookAwayMs) { lookAwaySince = now; reportViolation('looking_away', 'mediapipe-face', null, 'head turned'); }
+  } else lookAwaySince = 0;
+  return faces.length;
+}
+async function analyzeObjects() {
+  const objects = await objectModel.detect(video, 8, 0.45);
+  const phones = objects.filter((item) => item.class === 'cell phone' && item.score >= TUNING.phoneMinScore);
+  if (phones.length) {
+    phoneHits += 1;
+    if (phoneHits >= TUNING.phoneConsecutive) { phoneHits = 0; reportViolation('phone_detected', 'coco-ssd', phones[0].score); }
+  } else phoneHits = 0;
+}
+async function reacquireCamera() {
+  if (reacquiring || !active) return;
+  reacquiring = true;
+  try {
+    const fresh = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
+    if (!active) { fresh.getTracks().forEach((t) => t.stop()); return; }
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = fresh; video.srcObject = fresh; await video.play();
+    cameraBadSince = 0;
+    setStatus('Camera restored. Proctoring active.');
+  } catch { /* still unavailable; keep trying on later ticks */ }
+  finally { reacquiring = false; }
 }
 async function detectLoop() {
-  if (!active || !video || video.readyState < 2) {
-    if (active) loopTimer = window.setTimeout(detectLoop, 1500);
-    return;
-  }
+  if (!active) return;
   const now = Date.now();
   try {
-    const faceResult = faceDetector.detectForVideo(video, performance.now());
-    const faces = faceResult.detections || [];
-    if (faces.length >= 2) {
-      if (!multiSince) multiSince = now;
-      if (now - multiSince >= 2200) {
-        await reportViolation('multiple_faces', 'mediapipe-face-detector', 0.75);
-        multiSince = now;
+    if (!video || video.readyState < 2 || !trackLive()) {
+      // Unplugged, switched off, blocked by the OS or paused: this used to go completely unnoticed.
+      if (!cameraBadSince) cameraBadSince = now;
+      if (now - cameraBadSince >= TUNING.cameraLostMs) {
+        setStatus('Camera not available. Reconnect or unblock it now.');
+        cameraBadSince = now;
+        reportViolation('camera_lost', 'browser-camera', null);
       }
-    } else multiSince = 0;
-
-    if (faces.length === 0) {
-      if (!missingSince) missingSince = now;
-      if (now - missingSince >= 9000) {
-        await reportViolation('face_missing', 'mediapipe-face-detector', 0.7);
-        missingSince = now;
-      }
-    } else missingSince = 0;
-
-    const objects = await objectModel.detect(video);
-    const phones = objects.filter(item => item.class === 'cell phone' && item.score >= 0.68);
-    if (phones.length) {
-      phoneHits += 1;
-      if (phoneHits >= 2) {
-        await reportViolation('phone_detected', 'coco-ssd', phones[0].score);
-        phoneHits = 0;
-      }
-    } else phoneHits = 0;
+      reacquireCamera();
+    } else {
+      cameraBadSince = 0;
+      analyzeFaces(now);
+      tickCount += 1;
+      if (tickCount % TUNING.objectEvery === 0) await analyzeObjects();
+    }
   } catch (error) {
+    detectorFaults += 1;
     console.error('Local proctoring inference error:', error);
-    setStatus('AI detection paused. Contact the invigilator.');
+    if (detectorFaults >= 3) setStatus('AI detection paused. Contact the invigilator.');
   }
-  if (active) loopTimer = window.setTimeout(detectLoop, 1800);
+  if (active) loopTimer = window.setTimeout(detectLoop, TUNING.tickMs);
 }
+
+// Candidate must be visible (one face) before the exam starts: proves camera + detector both work.
+async function verifyFaceVisible() {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (video.readyState >= 2 && video.videoWidth) {
+      try {
+        const result = faceDetector.detectForVideo(video, performance.now());
+        const faces = (result.detections || []).filter((d) => (d.categories?.[0]?.score || 0) >= TUNING.faceMinScore);
+        if (faces.length === 1) return;
+        if (faces.length > 1) setStatus('Only the candidate may be in view. Ask others to move away.');
+        else setStatus('Look at the screen so your face is clearly visible, with good lighting.');
+      } catch (error) { throw new Error('AI proctoring could not initialize. Refresh the page and try again.'); }
+    }
+    await sleep(400);
+  }
+  throw new Error('We could not see exactly one face. Improve the lighting, face the camera, and try again.');
+}
+
 async function prepare() {
   const panel = ensurePanel();
   if (!panel.querySelector('#stpCameraConsent')?.checked) {
@@ -204,11 +317,9 @@ async function prepare() {
   }
   setStatus('Requesting camera permission…');
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access requires HTTPS and a supported browser.');
+  stopStream();
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
-    });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
   } catch {
     throw new Error('Camera permission is required. Allow camera access and try again.');
   }
@@ -216,45 +327,71 @@ async function prepare() {
   video.srcObject = stream;
   await video.play();
   try {
-    await loadModels();
-  } catch (error) {
-    stop();
+    await preload();
+  } catch {
+    stopStream();
     throw new Error('AI proctoring could not initialize. Check the internet connection and try again.');
   }
+  try { await verifyFaceVisible(); } catch (error) { stopStream(); throw error; }
   snapshotConsent = !!panel.querySelector('#stpSnapshotConsent')?.checked;
-  setStatus(snapshotConsent ? 'Camera ready. Incident snapshots enabled by consent.' :
-    'Camera ready. No incident images will be stored.');
+  setStatus(snapshotConsent ? 'Camera ready. Incident snapshots enabled by consent.' : 'Camera ready. No incident images will be stored.');
   panel.classList.add('stp-live');
   return snapshotConsent;
 }
-function activate(id, initialWarnings = 0) {
+
+// ---- heartbeat: lets the server notice a proctor that was switched off, keeps the timer on server time ----
+async function sendHeartbeat() {
+  if (!active) return;
+  const state = {
+    camera: trackLive(), models: !!faceDetector && !!objectModel, fullscreen: !!document.fullscreenElement,
+    visible: !document.hidden, monitors: window.screen?.isExtended === true, faults: detectorFaults
+  };
+  try {
+    const { ok, data } = await postJson('/api/proctoring/heartbeat', { state });
+    if (!ok || !active) return;
+    if (data.maxViolations) maxViolations = data.maxViolations;
+    setWarnings(Number(data.violationCount) || 0);
+    if (typeof window.secureTestSync === 'function') window.secureTestSync(data);
+    if (data.status === 'terminated') handleTermination('terminated');
+    else if (data.status === 'expired') handleTermination('expired');
+  } catch { /* offline: the next beat will catch up */ }
+}
+
+function activate(id, initialWarnings = 0, maxAllowed = 3) {
   testId = id;
   active = true;
-  multiSince = 0;
-  missingSince = 0;
-  phoneHits = 0;
+  maxViolations = maxAllowed || 3;
+  multiCount = 0; missingSince = 0; phoneHits = 0; lookAwaySince = 0; cameraBadSince = 0; tickCount = 0; detectorFaults = 0;
   lastSent.clear();
   setWarnings(initialWarnings);
   setStatus('Proctoring active. Keep your face visible and do not use a phone.');
   const panel = ensurePanel();
   const header = document.querySelector('#exam .exam-header');
   if (header && panel.parentElement !== header) header.appendChild(panel);
+  if (stream) stream.getVideoTracks().forEach((t) => { t.onended = () => { cameraBadSince = cameraBadSince || (Date.now() - TUNING.cameraLostMs + 1500); }; });
+  if (window.screen?.isExtended === true) reportViolation('multi_monitor', 'browser', null, 'extended display');
+  clearInterval(hbTimer);
+  hbTimer = setInterval(sendHeartbeat, TUNING.heartbeatMs);
+  sendHeartbeat();
   detectLoop();
+}
+function stopStream() {
+  if (stream) stream.getTracks().forEach((track) => { track.onended = null; track.stop(); });
+  stream = null;
+  if (video) video.srcObject = null;
 }
 function stop() {
   active = false;
   clearTimeout(loopTimer);
-  if (stream) stream.getTracks().forEach(track => track.stop());
-  stream = null;
-  if (video) video.srcObject = null;
-  faceDetector = null;
-  objectModel = null;
+  clearInterval(hbTimer);
+  stopStream();
+  // Models stay loaded: a failed start followed by a retry must not re-download or crash.
   testId = null;
   const panel = document.getElementById(PANEL_ID);
   if (panel) panel.classList.remove('stp-live');
 }
 ensurePanel();
 window.SecureTestProctoring = {
-  prepare, activate, stop, reportViolation,
+  prepare, preload, activate, stop, reportViolation,
   get warningCount() { return warningCount; }
 };

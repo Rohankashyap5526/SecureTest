@@ -108,3 +108,8 @@ body{background:var(--bg);color:var(--ink)}
 .consent-state{background:#f1f5f9;color:#475569}.consent-state.granted{background:#ecfdf3;color:#067647}
 .proctoring-table a{font-weight:700}
 @media(max-width:700px){.proctoring-table{min-width:760px!important;table-layout:auto!important}.proctoring-table th,.proctoring-table td{white-space:nowrap}}
+
+/* --- exam hardening / live monitor --- */
+body.exam .question-card,body.exam #question,body.exam #options .answer,body.exam .code-block{-webkit-user-select:none;user-select:none}
+body.exam #options textarea{-webkit-user-select:text;user-select:text}
+.proctoring-table tr.row-alert td{background:rgba(220,38,38,.07)}

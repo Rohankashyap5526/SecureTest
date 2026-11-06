@@ -22,3 +22,6 @@ jobs:
           node --check proctoring-server.js
           node --check public/app.js
           node --check public/proctoring.js
+          node --check lib/exam-layout.js lib/finalize.js lib/ttl-cache.js
+      - name: Unit + 150-candidate simulation tests
+        run: npm test
